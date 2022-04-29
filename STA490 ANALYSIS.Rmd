@@ -1,0 +1,393 @@
+---
+title: "No siginificant influence on the usage of electronic resources due to the COVID-19 pandemic"
+author: "Liangjiayi Wang"
+date: 2021-03-22
+output: 
+  pdf_document:
+    fig_caption: yes
+    highlight: pygments
+    keep_tex: yes
+    number_sections: yes
+    toc: no
+    
+abstract: |
+  This study investigated whether the closure of the libraries due to the COVID-19 pandemic have impact on the usage of electronic resources. The university closed its physical libraries at beginning of Jan 2020. The resources are collected from Counting Online Usage of Networked Electronic Resources (COUNTER) which records the use of licensed content by UofT affiliated users in specific periods. From Preliminary analysis, we found that the usage of electronic resources from students/staffs were changed significantly from January 2020 to April 2020. In 2020, the Elsevier and springer's recource requests are much higher than other vendors. Then, we use the negative binomial model to find the patterns within the data and measure how month and year influence the Electronic Resources. We find that the usage reports had a significant increase in February 2020, and the overall usage in 2020 is higher than in 2019. 
+---
+
+\newpage
+\tableofcontents 
+\newpage
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(readxl)
+library(dplyr)
+library(tibble)
+library(rmarkdown)
+library(markdown)
+library(knitr)
+#install.packages("AER")
+library(AER)
+#install.packages("vcd")
+library(vcd)
+library(MASS)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#read data
+setwd("/Users/ljyw/Desktop/UOFT/YEAR 4/WINTER/STA490/EDA")
+all_data<-read.csv('combined.csv')
+```
+
+# Introduction
+The COVID-19 rapidly affect our daily life and slow down the global economy. As UofT decided to close it library in Jan.2020 and this decision changes students/faculty members' information-seeking behavior. We expect most users will shift to remote learning through online resources. The purpose of this study is to examine whether the closure of the libraries due to the COVID 19 pandemic impact the usage of electronic resources.
+
+The resources are collected from Counting Online Usage of Networked Electronic Resources (COUNTER) which records the use of licensed content by UofT affiliated users in specific periods. We use R to analyze the potential influences of Electronic Content Usage based on the COVID-19 pandemic. There are 587742 observations in this dataset with 33 variables.We define that the university closed its physical library in Jan.2020. To approach the project, we will compare data from January 2019 to April 2019 and January 2020 to April 2020. Vendor, Metric type and Reporting period key variables we mainly use in analysis. There are 5 vendors which is our online information provider and 3 different metric type: 'Unique_Title_Requests' & 'Unique_Item_Requests'& 'Total_Item_Requests'. The Reporting Period: Jan.2019, Feb.2019, Mar.2019, Apr. 2019 & Jan.2020, Feb.2020, Mar.2020, Apr.2020 records the total number of the requests from each book during the month.
+
+
+This analysis report is divided into the following five parts:
+
+1.  Introduction: A summary of the research question and the context of data
+
+2.  Data Cleaning & Preparation: Decisions made in the data cleaning process
+
+3.  Methods: Design of the scientific study
+
+4.  Result: Insights into the research question
+
+5.  Conclusion/Discussion : Conclusion and Potential challenges for future analysis
+
+(note: All information are provide by Klara Maidenberg, the Assessment Librarian at the University of Toronto Libraries.)
+
+# Data Overview
+
+Data cleansing improves our data quality, increases overall productivity and helps analysis accuracy. 
+ 
+The First step is to check the type of data and transfer them into numeric or character. Having different data types for a given field makes it challenging to interpret results at the later stage. We found that the type of each variable is appropriate. So we will keep them.
+
+The second step, we only include the "Total_Item_Requests" metric type. We drop other metric type (i.e.Unique_Item_Requests and Unique_Title_Requests) which occupy about 57% of origional data. The reason for we only keep "Total_Item_Requests" is because that the counts recoded in R4 closesly matches total item requests.
+
+The third step is to remove the missing (NA) data. The assessment librarian provides multiple Excel reports which separated by year/vendor/series. And we combined all the reports into our "combined.csv" file. In this process, a lot of "NA" values were created for Jan.2019, Jan.2020, Feb.2019, etc. Those "NA"s appear because we combined 2019 and 2020 reports without changing the column names. Thus, we can replace the "NA"s with 0's. By this way, I keep the essential data, and it will not influence the calculation of total requests numbers.
+
+The last step is to create a subset. Since the original dataset has 33 variables, I only select the variables I mentioned in the introduction part. For example, I drop the redundant variables like data_type, reporting_period_html, proprietary_identifier.etc. There have lots of books with the same title, but from different sources, so I recombine and match the data by their unique DOI, ISSN, ISBN.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#check the type of all variable
+knitr::kable(sapply(all_data, class))
+knitr::kable(sapply(all_data, function(x) sum(is.na(x))))
+
+knitr::kable(unique(all_data$vendor),col.names = "Vendor")
+knitr::kable(unique(all_data$platform),col.names =  "Platform")
+knitr::kable(unique(all_data$metric_type),col.names =  "Metric Type")
+
+#Create same attribute
+all_data$metric_type[which(toupper(all_data$metric_type)=="TOTAL_ITEM_REQUESTS")] <-"Total_Item_Requests"
+all_data$metric_type[which(toupper(all_data$metric_type)=="UNIQUE_ITEM_REQUESTS")] <-"Unique_Item_Requests"
+
+# select column only has total_item_request
+all_data=all_data[which(all_data$metric_type =="Total_Item_Requests"),]
+
+#first subset
+df_new<- all_data %>% 
+  filter(!(is.na(doi)&is.na(journal_doi)&is.na(book_doi)&is.na(issn)&is.na(print_issn)
+                               &is.na(online_issn)&is.na(isbn)))%>%
+  mutate(across(ends_with('2019'),function(x)replace_na(x,0)),
+         across(ends_with('2020'),function(x)replace_na(x,0)))%>%
+  group_by(vendor,issn, print_issn,online_issn,isbn,book_doi,journal_doi,doi)%>%
+  summarise(
+    title=first(title),
+    first_time_publication = min(yop),
+    jan.2019=sum(jan.2019),
+    feb.2019=sum(feb.2019),
+    mar.2019=sum(mar.2019),
+    apr.2019=sum(apr.2019),
+    jan.2020=sum(jan.2020),
+    feb.2020=sum(feb.2020),
+    mar.2020=sum(mar.2020),
+    apr.2020=sum(apr.2020),
+    .groups='keep'
+  )
+
+#first subset
+df_new<- all_data %>% 
+  filter(!(is.na(doi)&is.na(journal_doi)&is.na(book_doi)&is.na(issn)&is.na(print_issn)
+                               &is.na(online_issn)&is.na(isbn)))%>%
+  mutate(across(ends_with('2019'),function(x)replace_na(x,0)),
+         across(ends_with('2020'),function(x)replace_na(x,0)))%>%
+  group_by(vendor,doi,journal_doi,book_doi,issn,print_issn,online_issn,isbn)%>%
+  summarise(
+    title=first(title),
+    first_year_of_publication=min(yop),
+    jan.2019=sum(jan.2019),
+    feb.2019=sum(feb.2019),
+    mar.2019=sum(mar.2019),
+    apr.2019=sum(apr.2019),
+    jan.2020=sum(jan.2020),
+    feb.2020=sum(feb.2020),
+    mar.2020=sum(mar.2020),
+    apr.2020=sum(apr.2020),
+    .groups='keep'
+  )
+
+# create subset with only with 2019/2020 data
+df_2019<-all_data %>% filter(is.na(jan.2020) & is.na(feb.2020)& is.na(mar.2020) & is.na(apr.2020))
+df_2020<-all_data %>% filter(is.na(jan.2019) & is.na(feb.2019)& is.na(mar.2019) & is.na(apr.2019))
+
+#create new column called year
+df_2019$YEAR=2019
+df_2020$YEAR=2020
+
+#recombine 2 datasets
+#another subset with Year
+total <- rbind(df_2019, df_2020)
+total$YEAR<-as.character(total$YEAR)
+```
+
+# Methods
+
+The following analysis is conducted into two parts: Preliminary insights and Modelling. 
+In preliminary insights, I will use the basic summary statistics, boxplot, and line graph to have an overview of the dataset and analysis on how electronic usage changes by different vendors and platforms. 
+In the modeling part, I will choose the most appropriate a statistical model to look for a relationship between variables, observe data patterns, draw conclusions, and ultimately answer the reseach questions. The count (or usage reports) is the outcome variable and indicates each book's total request each month. The month is a categorical predictor variable with four levels: Jan, Feb, Mar, and Apr and represents the month of usage reports. The year is also a categorical predictor variable with two levels indicating the year of usage reports, and it is coded as 2020 and 2019. Moreover, for the modeling part, we will form 2 different models: without interaction term (basic model) and with interaction term (complex model) and select the model that fits the data most.
+
+
+## Preliminary insights 
+
+Firstly, we use the summary statistics and boxplot to provide an overview of all the requests for each year. We found that the interquartile range (IQR) range is relatively small and similar in both years. However, the gap between max and min is enormous. The data points are distributed sparsely. In both years, we have many outliers. In this case, we will keep those outliers right now, and see how it influence the following analysis.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=6, fig.height=4}
+knitr::kable(total %>%
+  group_by(YEAR)%>%
+  summarise(mean=mean(reporting_period_total),
+            min=min(reporting_period_total),
+            q1=quantile(reporting_period_total,0.25),
+            med=median(reporting_period_total),
+            q3=quantile(reporting_period_total,0.75),
+            max=max(reporting_period_total)),
+  caption = "Summary table of Total Requests by Year")
+```
+
+### Vendor
+
+We look at changes to usage of electronic resources based on vendors. The following line graph indicates the total requests from each vendor by month. 
+
+From 2019 to 2020, Elsevier and Springer had the most outstanding overall total requests; Meanwhile, Taylor and Francis and Sage had the lowest general requests. Compared with the same period last year,no matter which vendor, the overall total requests from Jan.20-Apr.2020 were much higher due to coronavirus disease. 
+
+In 2019, the request for electronic resources reached a peak in March for each vendor. Comparatively, in 2020, the requestss reached a peak in February. The increase in requests for Wiley, Taylor and Francis, and Sage were slightly small in 2020. By contrast, the fluctuation of requests from Elsevier and Springer were much significant. The Elsevier's total requests had a sharp increase from Jan.2020 to Feb.2020. After that, it decreased dramatically until April. From Jan.2020 to Apr.2020, Springer's total requests continuously climbed to a remarkable amount.
+
+In general, due to the COVID-19 pandemic, the usage of electronic resources from students/staffs are significantly increasing, especially in 2020, February.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=10, fig.height=5}
+#Elsevier
+datasub1=df_new[which(df_new$vendor =="Elsevier"),]
+a<-sum(datasub1$jan.2019)
+b<-sum(datasub1$feb.2019)
+c<-sum(datasub1$mar.2019)
+d<-sum(datasub1$apr.2019)
+
+A<-sum(datasub1$jan.2020)
+B<-sum(datasub1$feb.2020)
+C<-sum(datasub1$mar.2020)
+D<-sum(datasub1$apr.2020)
+
+#Sage
+datasub1=df_new[which(df_new$vendor =="Sage"),]
+a1<-sum(datasub1$jan.2019)
+b1<-sum(datasub1$feb.2019)
+c1<-sum(datasub1$mar.2019)
+d1<-sum(datasub1$apr.2019)
+
+A1<-sum(datasub1$jan.2020)
+B1<-sum(datasub1$feb.2020)
+C1<-sum(datasub1$mar.2020)
+D1<-sum(datasub1$apr.2020)
+
+#Springer
+datasub1=df_new[which(df_new$vendor =="Springer"),]
+a2<-sum(datasub1$jan.2019)
+b2<-sum(datasub1$feb.2019)
+c2<-sum(datasub1$mar.2019)
+d2<-sum(datasub1$apr.2019)
+
+A2<-sum(datasub1$jan.2020)
+B2<-sum(datasub1$feb.2020)
+C2<-sum(datasub1$mar.2020)
+D2<-sum(datasub1$apr.2020)
+
+#Taylor and Francis
+datasub1=df_new[which(df_new$vendor =="Taylor and Francis"),]
+a3<-sum(datasub1$jan.2019)
+b3<-sum(datasub1$feb.2019)
+c3<-sum(datasub1$mar.2019)
+d3<-sum(datasub1$apr.2019)
+
+A3<-sum(datasub1$jan.2020)
+B3<-sum(datasub1$feb.2020)
+C3<-sum(datasub1$mar.2020)
+D3<-sum(datasub1$apr.2020)
+
+#Wiley
+datasub1=df_new[which(df_new$vendor =="Wiley"),]
+a4<-sum(datasub1$jan.2019)
+b4<-sum(datasub1$feb.2019)
+c4<-sum(datasub1$mar.2019)
+d4<-sum(datasub1$apr.2019)
+
+A4<-sum(datasub1$jan.2020)
+B4<-sum(datasub1$feb.2020)
+C4<-sum(datasub1$mar.2020)
+D4<-sum(datasub1$apr.2020)
+
+tab1<- data.frame(vendor = rep(c("Elsevier","Sage","Springer","Taylor and Francis","Wiley"), each = 8),
+                  Year=rep(c('2019','2020'),each = 4),
+                  M= rep(c('Jan.19','Feb.19','Mar.19','Apr.19','Jan.20','Feb.20','Mar.20','Apr.20'),each=1),
+                  value = c(a,b,c,d,A,B,C,D,a1,b1,c1,d1,A1,B1,C1,D1,a2,b2,c2,d2,A2,B2,C2,D2,a3,b3,c3,d3,A3,B3,C3,D3,
+                            a4,b4,c4,d4,A4,B4,C4,D4))
+
+
+tab1$M <- factor(tab1$M , levels = c('Jan.19','Feb.19','Mar.19','Apr.19','Jan.20','Feb.20','Mar.20','Apr.20'))
+
+tab1%>%
+  ggplot(aes(x=M,color=vendor))+
+  theme_minimal()+
+  geom_point(aes(y=value))+
+  geom_line(aes(y=value,group=vendor))+
+  facet_grid(~Year)+
+  labs(title = "Figure 1: Total Requests from each vendor by month",x="Month",y="count")
+```
+
+
+### Platform
+
+Finally, we can look at the total requests from each platform by year (i.e.How the changes to usage of electronic resources based on platforms.). Obviously, the ScienceDirect Licensed content occupied the most significant number of requests in both 2019 and 2020, followed by SpringerLink. And their amount increased sharply from 2019 to 2020.
+In comparison, the CQ press library, Scholars Portal Books and SAGE knowledge had the smallest requests. Other platforms increased slightly from 2019 to 2020, except Journals @ Scholars Portal.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=6, fig.height=4}
+df_platform<-total%>%
+  group_by(platform,YEAR)%>%
+  summarise(total_0=sum(reporting_period_total),
+            min_0=min(reporting_period_total),
+            mean_0=min(reporting_period_total),
+            max_0=max(reporting_period_total),)
+
+ggplot(df_platform,aes(platform,total_0,fill = YEAR)) +
+  geom_bar(stat = 'identity',position = "dodge")+
+  labs(title = "Figure 2: Total Requests from each plantform",x="Platform",y="count")+
+  scale_fill_brewer(palette="Blues")+
+  coord_flip()+
+  theme_minimal()
+```
+
+## Modeling
+### Model Selection 1 (Poisson vs Negative Binomal)
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# reverse the column and modify the data for modelling preparation
+df_clean<- df_new %>%
+  pivot_longer(
+    cols=c(ends_with('2019'),ends_with('2020')),
+    names_to="month",
+    values_to ="count"
+  )%>%
+  mutate(
+    month=factor(month,levels=c(
+      'jan.2019','feb.2019','mar.2019','apr.2019',
+      'jan.2020','feb.2020','mar.2020','apr.2020'
+    ))
+  )
+df_clean <- df_clean %>% separate(month,c('month','year'))
+```
+
+The Poisson distribution is widely used for modelling the number of occurrences of an event occurs in an interval of time, distance, or volume. If the events are happening independently and the probability that an event occurs in a given length of time does not change through time, the number of events in a fixed unit of time has a Poisson distribution. Also, we can use the distplot() to check whether the points is Poisson-distributed. From the Poissoness graph, we noticed that the point are followed by 45 degree line which indicate that the response variable followed poisson distribion. So Poisson regression could be one of our choices.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# log_count<-log(na.omit(df_clean$count))
+# log_count<-log_count[log_count != -Inf]
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+distplot(df_clean$count,type="poisson", xlab = "Number of occurrences", ylab = "Distribution parameter",main="Figure 3: Poissoness plot")
+```
+
+Meanwhile, negative binomial regression is a generalization of Poisson regression because it weakens the Poisson Model's restrictive assumption that the variance is equal to the mean. This inequality (mean $\neq$ variance) is captured by estimating the dispersion parameter. In other words, Negative binomial regression is also for modelling count variables, and it can be used for over-dispersed (variance > mean) count data.
+
+To decide use which model (poisson vs negative binomial), we will start from fitting basic poisson model (no interaction included) and test whether there exists the over-dispersion in our data. The null hypothesis for testing dispersion is equidispersion (i.e. c = 0). And the althernative hypothesis is overdispersed (i.e. c > 0). We use function dispersiontest() to test our hypothesis. From the following result, we clearly see that there is evidence of overdispersion (c is estimated to be 3910.635 and p-value<0.05) which strongly against the assumption of equidispersion. Thus, we will use the negative binomial regression in following analysis.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#Poisson model-Without interaction
+df_clean$month = factor(df_clean$month,levels = c("jan","feb","mar","apr"))
+df_clean$month <-relevel(as.factor(df_clean$month),"mar" )
+model<- glm(count ~ month + year,data = df_clean,family="poisson")
+dispersiontest(model, trafo = 1, alternative = c('greater', 'two.sided', 'less'))
+```
+
+### Model Selection 2 (With interaction term vs Without interaction term)
+Below we use the function glm.nb from the MASS package to estimate a negative binomial regression. Then, we use analysis on regression coefficients for each of the variables, along with standard errors, z-scores, and p-values.
+In general, we will fit 2 models (with interaction & without interaction). The independent variables: year and month may interact with each other, so we need use the model with interaction term to test the effects. If the interaction effect (year: month) is not statistically significant, those two variables will be independent of each other. However, the model with interaction effect may not be the fittest one, even when the interaction term is significant.
+
+To compare the model with interaction and without interaction, we will consider finding the model with the lowest value of the Akaike Information Criterion (AIC) and Schwarz' Bayesian Information Criterion (BIC). AIC and BIC are both penalized-likelihood criteria.
+
+The models are down below:
+
+#### Model-1:Negative binomial model- Without interaction  
+
+As mentioned above, in this model, Year and month is predictor variables with Mar and year2020 as reference level.
+$$Y \sim NegativeBinomial(r,p)$$
+$$log(p)=\beta_o+\beta_1x_{Jan}+\beta_2x_{Feb}+\beta_3x_{Apr}+\beta_4x_{year2020}$$
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Negative binomial model-Without interaction
+df_clean$month = factor(df_clean$month,levels = c("jan","feb","mar","apr"))
+df_clean$month <-relevel(df_clean$month,"mar" ) # use march as the reference level
+df_clean$year <-relevel(as.factor(df_clean$year),"2020" ) # use 2020 as the reference level
+model1 <- glm.nb(count ~ month+year,
+               data = df_clean,link="log")
+```
+
+#### Model-2:Negative binomial model- With interaction  
+
+In this model, Year, month and $month_i:year2019$(interaction term) are predictor variables with March and year 2020 as reference level.
+
+$$Y \sim NegativeBinomial(r,p)$$
+$$log(p)=\beta_o+\beta_1x_{Jan}+\beta_2x_{Feb}+\beta_3x_{Apr}+\beta_4x_{year2020}+\beta_{5i}x_{month_i:year2020}$$
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Negative binomial model-With interaction
+df_clean$month = factor(df_clean$month,levels = c("jan","feb","mar","apr"))
+df_clean$month <-relevel(df_clean$month,"mar" ) # use march as the reference level
+df_clean$year <-relevel(as.factor(df_clean$year),"2020" ) # use 2020 as the reference level
+model2 <- glm.nb(count ~ month+year+month:year,data = df_clean,link="log")
+```
+
+#### Model comparison  
+
+Compare the AIC for both models, AIC for model 1 is 2931264 and for model 2 is 2930995. Since 2930995 < 2931264, we can conclude that model 2 (with interaction tem) is better. Then we will analysis the result from model 2 and research on how resources usage influenced by covid-19.
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+knitr::kable(model1$aic, caption ="AIC for model 1") # aic for model 1
+knitr::kable(model2$aic, caption ="AIC for model 2") # aic for model 2
+```
+
+# Result
+Notice that the p-value for all preditors are smaller than 0.05 in table 4,and the confidence intervals for each preditor in table 5 do not include 0. Thus, all predictors are statistically significant at 5% level.
+
+We are interested in looking at usage reports rate ratios rather than coefficients. To do this, I exponentiate model coefficients and create table 5. In March 2020, the usage reports are about 10.22 (with range from 9.99	to 10.47) for each book on average. Compared with March 2020, in January 2020 and April 2020, each book's usage reports approximately decreased by 20% (with range from 16.5% to 21.8%) and 15% (with range from 12.1% to 17.7%), separately. However, in February 2020, each book's usage reports increased by 11% (with range from 7.6% to 14.9%) compared to March 2020 on average. 
+
+Differently, the usage reports in March 2020 are around 18% (with range from 15.2% to 20.6%) more compared to March 2019 on average. Also, from the interaction term, we noticed that each book's usage reports in January 2020 are (1-0.949*0.820)x100%=22% higher than January 2019 on average. In the same way, on average, the each book's usage reports in February 2020 are 42% higher than February 2020 and April 2020 are 33% higher than April 2020.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+model2mat = cbind(coef(model2), confint(model2, level=0.95))
+knitr::kable(summary(model2)$coef, digits=3,cap="Estimated coefficients(log-odds)") 
+knitr::kable(exp(model2mat),digits=3,cap="Rate ratios of usage reports")
+```
+
+
+#  Conclusion/Discussion 
+
+In the analysis part, we research how vendors and platforms influence the total requests by year and month; moreover, we select the Negative binomial regression model and analyze the factors that influence the usage report. The outcome variable is each book's usage report in each month, and the predictive variable is the year, month, and the interaction term with year and month. From the result of our model, on average, each book's usage reports in February 2020 and March 2020 are higher than the usage reports in April 2020 and January 2020. February 2020 and March 2020 is the period that covid-19 started and the library closed. From the model, we can conclude that electronic resource usage increased at the beginning of covid-19 (Febuary 2020) and gradually decreased from March 2020 to April 2020. However, due to our dataset's limited information, we cannot say that the fluctuation of usage reports is entirely influenced by library closure. For instance, the usage may be affected by students' movement from one country to another. Back to the research question, overall, there is no sufficient evidence to prove the physical library's closure due to covid-19 influence electronic resources' usage remarkably.
+
+Moreover, because of the limitation of the computer's operational capability and the large dataset, we cannot match each book's subject area by using API. If we have the information for the subject area, we can put it into the model and find the usage changes in specific subject areas. Meanwhile, we may use the DOI and ISSN to identify the type of electronic resources, for example, journals, periodicals, newspapers, annuals, and non-textual resources (e.g., image, audio, video, etc.). After recombining the data, we can research what kind of electronic resources have the most significant usages. If possible, we should limit the raw data to the long-term electronic users for eliminating the potential bias due to the change of electronic resources users. With the control of the other possible influences, the model results must be more accurate, and we can interpret the estimation of predictors as the effect of library closure.
+
+For further research,we can look at whether the amount of time that students spend using electronic resources has changed; Students/staffs prefer to use these resources during the day or at night? We may create a survey to collect the information that we need. Also, we can consider whether the COVID 19 pandemic is the only factor affecting the increase in the use of electronic resources from 2019 to 2020. I think there have other reasons, like updating the online system and providing more electronic resources, significantly influence users behaviour.
+
